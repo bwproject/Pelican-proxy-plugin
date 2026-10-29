@@ -1,10 +1,8 @@
 <?php
 
 return [
-    'mode' => env('BWPROXY_MODE', 'off'),
-    'socks5_host' => env('BWPROXY_SOCKS5_HOST', ''),
-    'socks5_port' => (int) env('BWPROXY_SOCKS5_PORT', 1080),
-    'socks5_username' => env('BWPROXY_SOCKS5_USERNAME', ''),
-    'socks5_password' => env('BWPROXY_SOCKS5_PASSWORD', ''),
-    'awg_interface' => env('BWPROXY_AWG_INTERFACE', 'awg0'),
+    // JSON object keyed by numeric Pelican node ID, e.g. {"1":"long-random-token"}.
+    // Keep this only in the panel .env; never commit node tokens.
+    'node_tokens' => json_decode((string) env('BWPROXY_NODE_TOKENS', '{}'), true) ?: [],
+    'agent_timeout' => (int) env('BWPROXY_AGENT_TIMEOUT', 10),
 ];
