@@ -29,8 +29,8 @@ class BWProxySettings extends Page
 
     public function mount(): void
     {
-        $server = filament()->getTenant();
-        abort_unless($server && isset($server->uuid, $server->node_id), 404);
+        $server = Filament::getTenant();
+        abort_unless($server && isset($server->uuid, $server->node_id), 404);\n        abort_unless((int) ($server->owner_id ?? 0) === (int) auth()->id(), 403);
 
         $setting = ServerProxySetting::query()->where('server_uuid', $server->uuid)->first();
         $this->form->fill([
