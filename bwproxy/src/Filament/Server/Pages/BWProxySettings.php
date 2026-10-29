@@ -3,6 +3,7 @@
 namespace BWProject\BWProxy\Filament\Server\Pages;
 
 use BWProject\BWProxy\Models\ServerProxySetting;
+use Filament\Facades\Filament;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Select;
@@ -20,7 +21,7 @@ class BWProxySettings extends Page
     use InteractsWithSchemas;
 
     protected static ?string $slug = 'bwproxy';
-    protected static string|null \BackedEnum $navigationIcon = 'heroicon-o-shield-check';
+    protected static string|\BackedEnum|null $navigationIcon = 'heroicon-o-shield-check';
     protected static ?string $navigationLabel = 'Прокси / VPN';
     protected static ?string $title = 'Прокси / VPN сервера';
     protected string $view = 'bwproxy::filament.server.pages.bwproxy-settings';
@@ -30,7 +31,8 @@ class BWProxySettings extends Page
     public function mount(): void
     {
         $server = Filament::getTenant();
-        abort_unless($server && isset($server->uuid, $server->node_id), 404);\n        abort_unless((int) ($server->owner_id ?? 0) === (int) auth()->id(), 403);
+        abort_unless($server && isset($server->uuid, $server->node_id), 404);
+        abort_unless((int) ($server->owner_id ?? 0) === (int) auth()->id(), 403);
 
         $setting = ServerProxySetting::query()->where('server_uuid', $server->uuid)->first();
         $this->form->fill([
