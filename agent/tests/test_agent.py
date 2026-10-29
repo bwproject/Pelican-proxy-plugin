@@ -29,6 +29,11 @@ class ValidationTests(unittest.TestCase):
     def test_escapes_redsocks_values(self):
         self.assertEqual(agent.quote_redsocks('a"b\\c'), '"a\\"b\\\\c"')
 
+    def test_socks_listener_is_loopback(self):
+        config = agent.socks_config({"socks5_host": "proxy.example", "socks5_port": 1080}, 23456)
+        self.assertIn("local_ip = 127.0.0.1", config)
+        self.assertNotIn("local_ip = 0.0.0.0", config)
+
     def test_deterministic_port(self):
         self.assertEqual(agent.server_port("server-1"), agent.server_port("server-1"))
         self.assertGreaterEqual(agent.server_port("server-1"), 20000)
