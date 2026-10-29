@@ -63,7 +63,7 @@ class BWProxySettings extends Page
                             ->live(),
                         Placeholder::make('server_info')
                             ->label('Сервер')
-                            ->content(fn () => (string) (filament()->getTenant()?->uuid ?? 'Не определён')),
+                            ->content(fn () => (string) (Filament::getTenant()?->uuid ?? 'Не определён')),
                     ]),
                 Section::make('SOCKS5')
                     ->description('Пароль хранится в БД в зашифрованном виде. Оставьте поле пароля пустым, чтобы сохранить текущий пароль.')
@@ -93,8 +93,9 @@ class BWProxySettings extends Page
 
     public function save(): void
     {
-        $server = filament()->getTenant();
+        $server = Filament::getTenant();
         abort_unless($server && isset($server->uuid, $server->node_id), 404);
+        abort_unless((int) ($server->owner_id ?? 0) === (int) auth()->id(), 403);
 
         $data = $this->form->getState();
         $validated = Validator::make($data, [
