@@ -1,0 +1,39 @@
+name: Plugin and agent checks
+
+on:
+  push:
+    branches:
+      - main
+      - feature/**
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+      - name: Validate PHP syntax
+        run: |
+          find bwproxy -type f -name '*.php' -print0 | xargs -0 -n1 php -l
+      - name: Validate JSON manifests
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          for path in Path("bwproxy").rglob("*.json"):
+              json.loads(path.read_text())
+              print(f"OK {path}")
+          PY
+      - name: Compile and test agent
+        run: |
+          python3 -m py_compile agent/bwproxy-agent.py
+          python3 -m unittest discover -s agent/tests -v
