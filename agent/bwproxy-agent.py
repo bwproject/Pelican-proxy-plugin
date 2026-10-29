@@ -107,9 +107,9 @@ def configure_firewall(settings: list[dict], addresses: dict[str, str]) -> None:
     ensure_chain("nat", "BWPROXY_TCP", "PREROUTING")
     ensure_chain("filter", "BWPROXY_UDP", "FORWARD")
     ensure_chain("mangle", "BWPROXY_MARK", "PREROUTING")
-    ensure_chain("filter", "BWPROXY_KILL", "FORWARD")
+    ensure_chain("filter", "BWPROXY_KILL", "FORWARD")\n    ensure_chain("nat", "BWPROXY_AWG_NAT", "POSTROUTING")
     for table, chain in (("nat", "BWPROXY_TCP"), ("filter", "BWPROXY_UDP"),
-                         ("mangle", "BWPROXY_MARK"), ("filter", "BWPROXY_KILL")):
+                         ("mangle", "BWPROXY_MARK"), ("filter", "BWPROXY_KILL"), ("nat", "BWPROXY_AWG_NAT")):
         run(["iptables", "-t", table, "-F", chain])
 
     # Local/private destinations must continue to work on Docker networks.
@@ -118,7 +118,7 @@ def configure_firewall(settings: list[dict], addresses: dict[str, str]) -> None:
     for subnet in private_v4:
         run(["iptables", "-t", "nat", "-A", "BWPROXY_TCP", "-d", subnet, "-j", "RETURN"])
         run(["iptables", "-t", "filter", "-A", "BWPROXY_UDP", "-d", subnet, "-j", "RETURN"])
-        run(["iptables", "-t", "mangle", "-A", "BWPROXY_MARK", "-d", subnet, "-j", "RETURN"])
+        run(["iptables", "-t", "mangle", "-A", "BWPROXY_MARK", "-d", subnet, "-j", "RETURN"])\n        run(["iptables", "-t", "filter", "-A", "BWPROXY_KILL", "-d", subnet, "-j", "RETURN"])
 
     for item in settings:
         ip = addresses.get(item["server_uuid"])
@@ -129,12 +129,12 @@ def configure_firewall(settings: list[dict], addresses: dict[str, str]) -> None:
             run(["iptables", "-t", "nat", "-A", "BWPROXY_TCP", "-s", ip, "-p", "tcp",
                  "-j", "REDIRECT", "--to-ports", str(port)])
             # SOCKS5 UDP support is not assumed. Fail closed instead of leaking UDP direct.
-            run(["iptables", "-t", "filter", "-A", "BWPROXY_UDP", "-s", ip, "-p", "udp", "-j", "DROP"])
+            run(["iptables", "-t", "filter", "-A", "BWPROXY_UDP", "-s", ip, "!", "-p", "tcp", "-j", "DROP"])
         elif item["mode"] == "amneziawg":
             mark, table_id = route_ids(item["server_uuid"])
             run(["iptables", "-t", "mangle", "-A", "BWPROXY_MARK", "-s", ip, "-j", "MARK", "--set-mark", str(mark)])
             interface = item.get("awg_interface") or "awg0"
-            run(["iptables", "-t", "filter", "-A", "BWPROXY_KILL", "-s", ip, "!", "-o", interface, "-j", "DROP"])
+            run(["iptables", "-t", "nat", "-A", "BWPROXY_AWG_NAT", "-s", ip, "-o", interface, "-j", "MASQUERADE"])\n            run(["iptables", "-t", "filter", "-A", "BWPROXY_KILL", "-s", ip, "!", "-o", interface, "-j", "DROP"])
             run(["ip", "route", "replace", "default", "dev", interface, "table", str(table_id)], check=False)
             rule = run(["ip", "rule", "show"], check=False).stdout
             if "fwmark 0x%x" % mark not in rule.lower() and "fwmark %d" % mark not in rule:
