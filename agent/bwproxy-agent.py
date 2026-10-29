@@ -19,6 +19,7 @@ CONFIG = Path(os.environ.get("BWPROXY_CONFIG", "/etc/bwproxy/agent.json"))
 RUNTIME = Path(os.environ.get("BWPROXY_RUNTIME", "/run/bwproxy"))
 STATE = Path(os.environ.get("BWPROXY_STATE", "/var/lib/bwproxy/state.json"))
 LOG = logging.getLogger("bwproxy-agent")
+_LAST_FIREWALL_SIGNATURE: str | None = None
 PRIVATE_NETS = tuple(ipaddress.ip_network(x) for x in (
     "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
     "127.0.0.0/8", "169.254.0.0/16", "fc00::/7", "::1/128",
@@ -114,6 +115,17 @@ def ensure_chain(table: str, chain: str, parent: str) -> None:
 
 
 def configure_firewall(settings: list[dict], addresses: dict[str, str], ipv6_addresses: dict[str, list[str]]) -> None:
+    global _LAST_FIREWALL_SIGNATURE
+    # Rebuild only when effective routing inputs change; never flush chains on every poll.
+    routing_settings = [
+        {key: item.get(key) for key in ("server_uuid", "mode", "socks5_host", "socks5_port", "awg_interface")}
+        for item in settings
+    ]
+    signature_data = json.dumps({"settings": routing_settings, "addresses": addresses,
+                                 "ipv6": ipv6_addresses}, sort_keys=True)
+    signature = hashlib.sha256(signature_data.encode()).hexdigest()
+    if signature == _LAST_FIREWALL_SIGNATURE:
+        return
     # Dedicated chains only; never flush the host's firewall or change its default route.
     ensure_chain("nat", "BWPROXY_TCP", "PREROUTING")
     ensure_chain("filter", "BWPROXY_UDP", "FORWARD")
@@ -182,6 +194,7 @@ def configure_firewall(settings: list[dict], addresses: dict[str, str], ipv6_add
         run(["ip", "route", "flush", "table", str(rule["table"])], check=False)
     STATE.write_text(json.dumps({"awg_rules": desired_awg}, sort_keys=True))
     STATE.chmod(0o600)
+    _LAST_FIREWALL_SIGNATURE = signature
 
 
 def route_ids(server_uuid: str) -> tuple[int, int]:
