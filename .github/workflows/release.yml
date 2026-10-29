@@ -1,0 +1,75 @@
+name: Build and publish latest plugin
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - feature/socks5-amneziawg
+
+permissions:
+  contents: write
+
+concurrency:
+  group: bwproxy-latest-release
+  cancel-in-progress: false
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate plugin manifest
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path("bwproxy/plugin.json")
+          data = json.loads(p.read_text())
+          assert data["id"] == "bwproxy"
+          assert data["class"] == "BWProxyPlugin"
+          print("Manifest OK")
+          PY
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+
+      - name: Validate PHP, JSON and agent
+        run: |
+          find bwproxy -type f -name '*.php' -print0 | xargs -0 -n1 php -l
+          python -m py_compile agent/bwproxy-agent.py
+          python -m unittest discover -s agent/tests -v
+
+      - name: Package plugin ZIP
+        run: |
+          test -f bwproxy/plugin.json
+          rm -f bwproxy.zip
+          zip -r bwproxy.zip bwproxy
+
+      # Keep the moving latest tag pointed at the newest commit on the
+      # configured release branches. The release asset is then replaced below.
+      - name: Move latest tag to this commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f latest "${GITHUB_SHA}"
+          git push origin refs/tags/latest --force
+
+      - name: Publish or update latest GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view latest >/dev/null 2>&1; then
+            gh release edit latest --title "BW Proxy & AmneziaWG Latest" --latest
+          else
+            gh release create latest --title "BW Proxy & AmneziaWG Latest" --notes "Automatically built from the latest commit on the configured release branches." --latest
+          fi
+          gh release upload latest bwproxy.zip --clobber

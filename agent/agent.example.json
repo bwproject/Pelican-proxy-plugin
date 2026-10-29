@@ -1,0 +1,7 @@
+{
+  "panel_url": "https://panel.example.com",
+  "node_id": 1,
+  "token": "REPLACE_WITH_UNIQUE_RANDOM_NODE_TOKEN",
+  "poll_interval": 5,
+  "timeout": 10
+}

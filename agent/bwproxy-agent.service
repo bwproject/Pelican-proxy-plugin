@@ -1,0 +1,25 @@
+[Unit]
+Description=BW Proxy Agent for Pelican/Wings
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+Environment=PYTHONUNBUFFERED=1
+Environment=BWPROXY_CONFIG=/etc/bwproxy/agent.json
+Environment=BWPROXY_RUNTIME=/run/bwproxy
+ExecStart=/usr/bin/python3 /opt/bwproxy/bwproxy-agent.py
+Restart=always
+RestartSec=5
+NoNewPrivileges=false
+ProtectHome=true
+ProtectSystem=full
+ReadWritePaths=/run/bwproxy /etc/bwproxy
+PrivateTmp=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
