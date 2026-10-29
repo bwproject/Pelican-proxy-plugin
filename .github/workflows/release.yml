@@ -1,0 +1,40 @@
+name: Build plugin ZIP
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - latest
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate plugin manifest
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path("bwproxy/plugin.json")
+          data = json.loads(p.read_text())
+          assert data["id"] == "bwproxy"
+          assert data["class"] == "BWProxyPlugin"
+          print("Manifest OK")
+          PY
+      - name: Package plugin
+        run: |
+          test -f bwproxy/plugin.json
+          zip -r bwproxy.zip bwproxy
+      - name: Publish latest release
+        if: github.ref == 'refs/tags/latest'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: BW Proxy & AmneziaWG Latest
+          make_latest: true
+          overwrite_files: true
+          files: bwproxy.zip
