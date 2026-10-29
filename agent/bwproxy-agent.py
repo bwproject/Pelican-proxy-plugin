@@ -17,6 +17,7 @@ from pathlib import Path
 
 CONFIG = Path(os.environ.get("BWPROXY_CONFIG", "/etc/bwproxy/agent.json"))
 RUNTIME = Path(os.environ.get("BWPROXY_RUNTIME", "/run/bwproxy"))
+STATE = Path(os.environ.get("BWPROXY_STATE", "/var/lib/bwproxy/state.json"))
 LOG = logging.getLogger("bwproxy-agent")
 PRIVATE_NETS = tuple(ipaddress.ip_network(x) for x in (
     "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
@@ -76,7 +77,7 @@ def server_port(server_uuid: str) -> int:
     return 20000 + (int(hashlib.sha256(server_uuid.encode()).hexdigest()[:8], 16) % 20000)
 
 
-def docker_ipv4(server_uuid: str) -> str | None:
+def docker_addresses(server_uuid: str) -> tuple[str | None, list[str]]:
     candidates = ("server-" + server_uuid, server_uuid)
     for name in candidates:
         result = run(["docker", "inspect", name], check=False)
@@ -85,13 +86,23 @@ def docker_ipv4(server_uuid: str) -> str | None:
         try:
             obj = json.loads(result.stdout)[0]
             networks = obj.get("NetworkSettings", {}).get("Networks", {})
+            ipv4 = None
+            ipv6: list[str] = []
             for network in networks.values():
                 address = network.get("IPAddress")
                 if address:
-                    return str(ipaddress.ip_address(address))
+                    parsed = ipaddress.ip_address(address)
+                    if parsed.version == 4:
+                        ipv4 = str(parsed)
+                for candidate in (network.get("GlobalIPv6Address"), network.get("IPv6Address")):
+                    if candidate:
+                        parsed = ipaddress.ip_address(candidate)
+                        if parsed.version == 6 and str(parsed) not in ipv6:
+                            ipv6.append(str(parsed))
+            return ipv4, ipv6
         except (ValueError, IndexError, KeyError, TypeError):
             continue
-    return None
+    return None, []
 
 
 def ensure_chain(table: str, chain: str, parent: str) -> None:
@@ -102,13 +113,18 @@ def ensure_chain(table: str, chain: str, parent: str) -> None:
         run(["iptables", "-t", table, "-I", parent, "1", "-j", chain])
 
 
-def configure_firewall(settings: list[dict], addresses: dict[str, str]) -> None:
+def configure_firewall(settings: list[dict], addresses: dict[str, str], ipv6_addresses: dict[str, list[str]]) -> None:
     # Dedicated chains only; never flush the host's firewall or change its default route.
     ensure_chain("nat", "BWPROXY_TCP", "PREROUTING")
     ensure_chain("filter", "BWPROXY_UDP", "FORWARD")
     ensure_chain("mangle", "BWPROXY_MARK", "PREROUTING")
     ensure_chain("filter", "BWPROXY_KILL", "FORWARD")
     ensure_chain("nat", "BWPROXY_AWG_NAT", "POSTROUTING")
+    run(["ip6tables", "-N", "BWPROXY_V6"], check=False)
+    run(["ip6tables", "-C", "FORWARD", "-j", "BWPROXY_V6"], check=False)
+    if run(["ip6tables", "-C", "FORWARD", "-j", "BWPROXY_V6"], check=False).returncode != 0:
+        run(["ip6tables", "-I", "FORWARD", "1", "-j", "BWPROXY_V6"])
+    run(["ip6tables", "-F", "BWPROXY_V6"])
     for table, chain in (("nat", "BWPROXY_TCP"), ("filter", "BWPROXY_UDP"),
                          ("mangle", "BWPROXY_MARK"), ("filter", "BWPROXY_KILL"), ("nat", "BWPROXY_AWG_NAT")):
         run(["iptables", "-t", table, "-F", chain])
@@ -122,10 +138,16 @@ def configure_firewall(settings: list[dict], addresses: dict[str, str]) -> None:
         run(["iptables", "-t", "mangle", "-A", "BWPROXY_MARK", "-d", subnet, "-j", "RETURN"])
         run(["iptables", "-t", "filter", "-A", "BWPROXY_KILL", "-d", subnet, "-j", "RETURN"])
 
+    for subnet in ("fc00::/7", "fe80::/10", "::1/128"):
+        run(["ip6tables", "-A", "BWPROXY_V6", "-d", subnet, "-j", "RETURN"])
+    desired_awg: dict[str, dict[str, int]] = {}
     for item in settings:
         ip = addresses.get(item["server_uuid"])
         if not ip or item["mode"] == "off":
             continue
+        # IPv6 policy routing is not implemented yet: block external IPv6 to prevent bypass.
+        for ipv6 in ipv6_addresses.get(item["server_uuid"], []):
+            run(["ip6tables", "-A", "BWPROXY_V6", "-s", ipv6, "-j", "DROP"])
         if item["mode"] == "socks5":
             port = server_port(item["server_uuid"])
             run(["iptables", "-t", "nat", "-A", "BWPROXY_TCP", "-s", ip, "-p", "tcp",
@@ -134,15 +156,32 @@ def configure_firewall(settings: list[dict], addresses: dict[str, str]) -> None:
             run(["iptables", "-t", "filter", "-A", "BWPROXY_UDP", "-s", ip, "!", "-p", "tcp", "-j", "DROP"])
         elif item["mode"] == "amneziawg":
             mark, table_id = route_ids(item["server_uuid"])
+            priority = 10000 + mark
+            desired_awg[item["server_uuid"]] = {"mark": mark, "table": table_id, "priority": priority}
             run(["iptables", "-t", "mangle", "-A", "BWPROXY_MARK", "-s", ip, "-j", "MARK", "--set-mark", str(mark)])
             interface = item.get("awg_interface") or "awg0"
             run(["iptables", "-t", "nat", "-A", "BWPROXY_AWG_NAT", "-s", ip, "-o", interface, "-j", "MASQUERADE"])
             run(["iptables", "-t", "filter", "-A", "BWPROXY_KILL", "-s", ip, "!", "-o", interface, "-j", "DROP"])
             run(["ip", "route", "replace", "default", "dev", interface, "table", str(table_id)], check=False)
             rule = run(["ip", "rule", "show"], check=False).stdout
-            if "fwmark 0x%x" % mark not in rule.lower() and "fwmark %d" % mark not in rule:
-                run(["ip", "rule", "add", "priority", str(10000 + (mark % 1000)),
+            if ("fwmark 0x%x" % mark not in rule.lower() and "fwmark %d" % mark not in rule) or ("lookup %d" % table_id not in rule and "table %d" % table_id not in rule):
+                run(["ip", "rule", "add", "priority", str(priority),
                      "fwmark", str(mark), "table", str(table_id)], check=False)
+
+    STATE.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    try:
+        previous = json.loads(STATE.read_text())
+    except (OSError, ValueError):
+        previous = {}
+    previous_awg = previous.get("awg_rules", {}) if isinstance(previous, dict) else {}
+    for server_uuid, rule in previous_awg.items():
+        if server_uuid in desired_awg:
+            continue
+        run(["ip", "rule", "del", "priority", str(rule["priority"]),
+             "fwmark", str(rule["mark"]), "table", str(rule["table"])], check=False)
+        run(["ip", "route", "flush", "table", str(rule["table"])], check=False)
+    STATE.write_text(json.dumps({"awg_rules": desired_awg}, sort_keys=True))
+    STATE.chmod(0o600)
 
 
 def route_ids(server_uuid: str) -> tuple[int, int]:
@@ -168,15 +207,17 @@ def stop_stale_redsocks(active: set[str], processes: dict[str, subprocess.Popen]
 def apply(settings: list[dict], processes: dict[str, subprocess.Popen], hashes: dict[str, str]) -> None:
     valid = []
     addresses: dict[str, str] = {}
+    ipv6_addresses: dict[str, list[str]] = {}
     for item in settings:
         validate_setting(item)
         if item["mode"] == "off":
             continue
-        ip = docker_ipv4(item["server_uuid"])
+        ip, ipv6 = docker_addresses(item["server_uuid"])
         if not ip:
             LOG.warning("Container for server %s is not running; skipping until next poll", item["server_uuid"])
             continue
         addresses[item["server_uuid"]] = ip
+        ipv6_addresses[item["server_uuid"]] = ipv6
         valid.append(item)
 
     socks_active = {x["server_uuid"] for x in valid if x["mode"] == "socks5"}
@@ -205,7 +246,7 @@ def apply(settings: list[dict], processes: dict[str, subprocess.Popen], hashes: 
         processes[server_uuid] = proc
         hashes[server_uuid] = digest
 
-    configure_firewall(valid, addresses)
+    configure_firewall(valid, addresses, ipv6_addresses)
 
 
 def fetch_desired(config: dict) -> dict:
