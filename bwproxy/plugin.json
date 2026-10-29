@@ -2,14 +2,15 @@
     "id": "bwproxy",
     "name": "BW Proxy & AmneziaWG",
     "author": "bwproject",
-    "version": "0.1.0",
-    "description": "Настройки исходящего SOCKS5-прокси и AmneziaWG для узла Pelican.",
+    "version": "0.2.0",
+    "description": "Per-server SOCKS5 and AmneziaWG routing for Pelican nodes.",
     "category": "plugin",
     "update_url": "https://raw.githubusercontent.com/bwproject/Pelican-proxy-plugin/main/bwproxy/update.json",
     "namespace": "BWProject\\BWProxy",
     "class": "BWProxyPlugin",
     "panels": [
-        "admin"
+        "admin",
+        "server"
     ],
     "panel_version": null,
     "api_version": 1,
