@@ -5,7 +5,6 @@ namespace BWProject\BWProxy\Filament\Server\Pages;
 use BWProject\BWProxy\Models\ServerProxySetting;
 use Filament\Facades\Filament;
 use Filament\Actions\Action;
-use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
@@ -61,9 +60,6 @@ class BWProxySettings extends Page
                             ])
                             ->required()
                             ->live(),
-                        Placeholder::make('server_info')
-                            ->label('Сервер')
-                            ->content(fn () => (string) (Filament::getTenant()?->uuid ?? 'Не определён')),
                     ]),
                 Section::make('SOCKS5')
                     ->description('Пароль хранится в БД в зашифрованном виде. Оставьте поле пароля пустым, чтобы сохранить текущий пароль.')
