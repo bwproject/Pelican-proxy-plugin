@@ -61,7 +61,7 @@ def quote_redsocks(value: str) -> str:
 def socks_config(setting: dict, port: int) -> str:
     rows = [
         "base { log_debug = off; log_info = on; log = stderr; daemon = off; redirector = iptables; }",
-        "redsocks { local_ip = 0.0.0.0; local_port = %d; ip = %s; port = %d; type = socks5;" %
+        "redsocks { local_ip = 127.0.0.1; local_port = %d; ip = %s; port = %d; type = socks5;" %
         (port, quote_redsocks(setting["socks5_host"]), setting["socks5_port"]),
     ]
     if setting.get("socks5_username"):
